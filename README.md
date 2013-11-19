@@ -9,6 +9,12 @@ JSON-encoded JavaScript object, which is what kodb allows us to do.
 To manage the asynchronous interactions with the database, kodb uses promises
 (provided by the Q library), therefore every public method returns a promise.
 
+##Install
+
+```bash
+npm install kodb
+```
+
 ##Example usage
 
 ```javascript
@@ -46,7 +52,7 @@ Q()
 	.then(function (obj) {
 		// Delete key
 		return kodb.del(key);
-	});
+	})
 	.then(function () {
 		// Disconnect from the database
 		return kodb.disconnect();
