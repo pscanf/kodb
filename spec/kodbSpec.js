@@ -1,6 +1,6 @@
 // kodbSpec.js
-// {{{ Dependencies
 
+// Dependencies
 	var crypto	= require("crypto");
 	var _		= require("lodash");
 	var must	= require("must");
@@ -8,136 +8,151 @@
 	var redis	= require("redis");
 	var rewire	= require("rewire");
 
-// }}}
-// {{{ Module
+// Module to test
+	var kodb	= rewire("../src/kodb.js");
 
-	var db		= rewire("../src/kodb.js");
 
-// }}}
-// {{{ The utils private object
 
+// Setup
+	var v = {};
+	v.JSONStringKey			= "JSONStringKey";
+	v.object				= {"testProperty": "testValue"};
+	v.JSONStringValue		= JSON.stringify(v.object);
+	v.nonJSONStringKey		= "nonJSONStringKey";
+	v.nonJSONStringValue	= "nonJSONStringValue";
+	var REDIS = {};
+	before(function (done) {
+		Q()
+			.then(function () {
+				REDIS.client	= redis.createClient();
+				REDIS.get		= Q.nbind(REDIS.client.get, REDIS.client);
+				REDIS.set		= Q.nbind(REDIS.client.set, REDIS.client);
+				REDIS.del		= Q.nbind(REDIS.client.del, REDIS.client);
+				var deferred = Q.defer();
+				REDIS.client.on("ready", deferred.resolve);
+				return deferred.promise;
+			})
+			.then(function () {
+				return Q.all([
+					REDIS.set(v.JSONStringKey, v.JSONStringValue),
+					REDIS.set(v.nonJSONStringKey, v.nonJSONStringValue)
+				]);
+			})
+			.done(function () {
+				done();
+			});
+	});
+	var f = {};
+	f.connect = function (done) {
+		kodb.connect().done(done);
+	};
+	f.disconnect = function (done) {
+		kodb.disconnect().done(done);
+	};
+	f.passError = function (error) {
+		return Q(error.message);
+	};
+
+
+
+// TEST 0 - The _ private object
 	// Since these two functions are trivial, I'm going to
 	// assume their correctness. I just need to know thy are
 	// defined. For now.
-	describe("The utils private object", function () {
-		var utils = db.__get__("utils");
+	describe("The _ private object", function () {
+		var lodash = kodb.__get__("_");
 		it("must have a isStringifiedObject method", function () {
-			utils.must.have.property("isStringifiedObject");
-			utils.isStringifiedObject.must.be.a.function();
+			lodash.must.have.property("isStringifiedObject");
+			lodash.isStringifiedObject.must.be.a.function();
 		});
 		it("must have a getRandomString method", function () {
-			utils.must.have.property("getRandomString");
-			utils.getRandomString.must.be.a.function();
+			lodash.must.have.property("getRandomString");
+			lodash.getRandomString.must.be.a.function();
 		});
 	});
 
-// }}}
-// {{{ The kodb module
 
-	describe("The kodb module", function () {
-		it("must export a connect method", function () {
-			db.must.have.property("connect");
-			db.connect.must.be.a.function();
-		});
-		it("must export a disconnect method", function () {
-			db.must.have.property("disconnect");
-			db.disconnect.must.be.a.function();
-		});
-		it("must export a get method", function () {
-			db.must.have.property("get");
-			db.get.must.be.a.function();
-		});
-		it("must export a set method", function () {
-			db.must.have.property("set");
-			db.set.must.be.a.function();
-		});
-		it("must export a del method", function () {
-			db.must.have.property("del");
-			db.del.must.be.a.function();
-		});
-		it("must export a exists method", function () {
-			db.must.have.property("exists");
-			db.exists.must.be.a.function();
-		});
-		it("must export a getUniqueKey method", function () {
-			db.must.have.property("getUniqueKey");
-			db.getUniqueKey.must.be.a.function();
+
+// TEST 1 - The kodb methods
+	v.methods = [
+		"connect",			"disconnect",		"loadObject",
+		"saveObject",		"deleteObject",		"isObject",
+		"createSet",		"deleteSet",		"clearSet",
+		"isSet",			"addToSet",			"removeFromSet",
+		"existsInSet",		"getSetMembers",	"getSetCardinality",
+		"deleteKey",		"existsKey",		"getUniqueKey"
+	];
+	describe("The kodb methods", function () {
+		it("must be the ones here defined (see test code)", function () {
+			v.methods.forEach(function (method) {
+				kodb.must.have.property(method);
+				kodb[method].must.be.a.function();
+			});
 		});
 	});
-
-// }}}
-// {{{ All of the above methods
-
-	describe("All of the above methods", function () {
-		it("must return a promise", function (done) {
-			Q()
-				.then(function () {
-					var ret = db.connect();
-					Q.isPromise(ret).must.be.true();
-					return ret;
-				})
-				.then(function () {
-					var ret = db.set("someKey", {"someProperty": "someValue"});
-					Q.isPromise(ret).must.be.true();
-					return ret;
-				})
-				.then(function () {
-					var ret = db.get("someKey");
-					Q.isPromise(ret).must.be.true();
-					return ret;
-				})
-				.then(function () {
-					var ret = db.del("someKey");
-					Q.isPromise(ret).must.be.true();
-					return ret;
-				})
-				.then(function () {
-					var ret = db.exists("someKey");
-					Q.isPromise(ret).must.be.true();
-					return ret;
-				})
-				.then(function () {
-					var ret = db.getUniqueKey();
-					Q.isPromise(ret).must.be.true();
-					return ret;
-				})
-				.then(function () {
-					var ret = db.disconnect();
-					Q.isPromise(ret).must.be.true();
-					return ret;
+	describe("The kodb methods, except for connect and disconnect", function () {
+		var methods = _.without(v.methods, "connect", "disconnect");
+		it("must return promises", function () {
+			methods.forEach(function (method) {
+				var promise = kodb[method]();
+				Q.isPromise(promise).must.be.true();
+			});
+		});
+		it("must throw if there is no connection to the database", function (done) {
+			var promises = [];
+			methods.forEach(function (method, index) {
+				promises[index] = kodb[method]();
+			});
+			Q.allSettled(promises)
+				.then(function (results) {
+					results.forEach(function (result) {
+						result.state.must.equal("rejected");
+						result.reason.message.must.equal("You must first connect to the database.");
+					});
 				})
 				.done(function () {
 					done();
 				});
 		});
 	});
+	describe("The kodb methods connect and disconnect", function () {
+		var methods = ["connect", "disconnect"];
+		it("must return promises", function () {
+			methods.forEach(function (method) {
+				var promise = kodb[method]();
+				Q.isPromise(promise).must.be.true();
+			});
+		});
+	});
 
-// }}}
+/*
 // {{{ The connect method
 
 	describe("The connect method", function () {
 		it("must connect the client to the database", function (done) {
 			Q()
 				.then(function () {
-					return db.connect();
+					return kodb.connect();
 				})
 				.then(function () {
-					db.__get__("db").client.connected.must.be.true();
-					done();
+					kodb.__get__("db").client.connected.must.be.true();
 				})
-				.done();
+				.done(function () {
+					done();
+				});
 		});
 		it("must return \"Already connected.\" if it's already connected.", function (done) {
 			Q()
 				.then(function () {
-					db.__get__("db").client.connected.must.be.true();
-					return db.connect();
+					kodb.__get__("db").client.connected.must.be.true();
+					return kodb.connect();
 				})
 				.then(function (ret) {
 					ret.must.equal("Already connected.");
-					done();
 				})
-				.done();
+				.done(function () {
+					done();
+				});
 		});
 	});
 
@@ -148,105 +163,169 @@
 		it("must disconnect the client from the database", function (done) {
 			Q()
 				.then(function () {
-					return db.disconnect();
+					return kodb.disconnect();
 				})
 				.then(function () {
-					db.__get__("db").client.connected.must.be.false();
-					done();
+					kodb.__get__("db").client.connected.must.be.false();
 				})
-				.done();
+				.done(function () {
+					done();
+				});
 		});
 		it("must return \"Already disconnected.\" if it's already disconnected.", function (done) {
 			Q()
 				.then(function () {
-					db.__get__("db").client.connected.must.not.be.true();
-					return db.disconnect();
+					kodb.__get__("db").client.connected.must.not.be.true();
+					return kodb.disconnect();
 				})
 				.then(function (ret) {
 					ret.must.equal("Already disconnected.");
-					done();
 				})
-				.done();
+				.done(function () {
+					done();
+				});
 		});
 	});
 
 // }}}
-// {{{ The get, set, del, exists, and getUniqueKey methods
+// {{{ Upon connection, the loadObject method
 
-	describe("The get method", function () {
-		it("must throw if there is no connection to the database", function (done) {
-			Q()
-				.then(function () {
-					return db.get("someKey");
-				})
-				.catch(function (e) {
-					e.message.must.equal("You must first connect to the database.");
-					done();
-				})
-				.done();
-		});
-	});
+	describe("Upon connection, the loadObject method", function () {
 
-	describe("The set method", function () {
-		it("must throw if there is no connection to the database", function (done) {
-			Q()
-				.then(function () {
-					return db.set("someKey", {"someProperty": "someValue"});
-				})
-				.catch(function (e) {
-					e.message.must.equal("You must first connect to the database.");
-					done();
-				})
-				.done();
-		});
-	});
+		before(connect);
 
-	describe("The del method", function () {
-		it("must throw if there is no connection to the database", function (done) {
-			Q()
-				.then(function () {
-					return db.del("someKey");
-				})
-				.catch(function (e) {
-					e.message.must.equal("You must first connect to the database.");
+		it("must throw if its first argument is not a string", function (done) {
+			kodb.loadObject({})
+				.catch(passError)
+				.done(function (message) {
+					message.must.equal("First argument must be a string.");
 					done();
-				})
-				.done();
+				});
 		});
-	});
 
-	describe("The exists method", function () {
-		it("must throw if there is no connection to the database", function (done) {
-			Q()
-				.then(function () {
-					return db.exists("someKey");
-				})
-				.catch(function (e) {
-					e.message.must.equal("You must first connect to the database.");
+		it("must throw if in the db there is not a stringified object", function (done) {
+			kodb.loadObject(nonJSONStringKey)
+				.catch(passError)
+				.done(function (message) {
+					message.must.equal("Not an object.");
 					done();
-				})
-				.done();
+				});
 		});
-	});
 
-	describe("The getUniqueKey method", function () {
-		it("must throw if there is no connection to the database", function (done) {
-			Q()
-				.then(function () {
-					return db.getUniqueKey();
-				})
-				.catch(function (e) {
-					e.message.must.equal("You must first connect to the database.");
+		it("must return the stored object when in the db there is a stringified object", function (done) {
+			kodb.loadObject(JSONStringKey)
+				.done(function (obj) {
+					_.isEqual(obj, object).must.be.true();
 					done();
-				})
-				.done();
+				});
 		});
+
+		after(disconnect);
+
 	});
 
 // }}}
-// {{{ Upon connection, the get method
+// {{{ Upon connection, the saveObject method
 
-	describe("Upon connection, the get method", function () {
+	describe("Upon connection, the saveObject method", function (done) {
+
+		var rdb = {};
+
+		var object = {
+			"testProperty": "testValue"
+		};
+
+		var JSONStringKey		= "JSONStringKey";
+		var JSONStringValue		= JSON.stringify(object);
+
+		before(function (done) {
+			Q()
+				.then(function () {
+					var deferred = Q.defer();
+					rdb.client	= redis.createClient();
+					rdb.get	= Q.nbind(rdb.client.get, rdb.client);
+					rdb.del	= Q.nbind(rdb.client.del, rdb.client);
+					rdb.client.on("ready", deferred.resolve);
+					return deferred.promise;
+				})
+				.then(function () {
+					return rdb.del(JSONStringKey);
+				})
+				.then(function () {
+					return kodb.connect();
+				})
+				.done(function () {
+					done();
+				});
+		});
+
+		it("must throw if its first argument is not a string", function (done) {
+			Q()
+				.then(function () {
+					return kodb.saveObject({});
+				})
+				.catch(function (e) {
+					e.message.must.equal("First argument must be a string.");
+				})
+				.done(function () {
+					done();
+				});
+		});
+
+		it("must throw if its second argument is not a plain object", function (done) {
+			Q()
+				.then(function () {
+					return kodb.saveObject("", "");
+				})
+				.catch(function (e) {
+					e.message.must.equal("Second argument must be a plain object.");
+				})
+				.done(function () {
+					done();
+				});
+		});
+
+		it("must set key/value to first argument/JSON-encoded second argument", function (done) {
+			Q()
+				.then(function () {
+					return kodb.saveObject(JSONStringKey, object);
+				})
+				.then(function () {
+					return rdb.get(JSONStringKey);
+				})
+				.then(function (value) {
+					value.must.equal(JSONStringValue);
+				})
+				.done(function () {
+					done();
+				});
+		});
+
+		after(function (done) {
+			Q()
+				.then(function () {
+					return rdb.del(JSONStringKey);
+				})
+				.then(function () {
+					var deferred = Q.defer();
+					rdb.client.quit();
+					rdb.client.on("end", deferred.resolve);
+					return deferred.promise;
+				})
+				.then(function () {
+					return kodb.disconnect();
+				})
+				.done(function () {
+					done();
+				});
+		});
+
+	});
+
+// }}}
+// {{{ Upon connection, the deleteObject method
+
+	describe("Upon connection, the deleteObject method", function (done) {
 
 		var rdb = {};
 
@@ -259,8 +338,6 @@
 
 		var nonJSONStringKey	= "nonJSONStringKey";
 		var nonJSONStringValue	= "nonJSONStringValue";
-
-		var nonExistingKey		= "nonExistingKey";
 
 		before(function (done) {
 			Q()
@@ -279,248 +356,57 @@
 					return rdb.set(nonJSONStringKey, nonJSONStringValue);
 				})
 				.then(function () {
-					return rdb.del(nonExistingKey);
+					return kodb.connect();
 				})
-				.then(function () {
-					return db.connect();
-				})
-				.then(function () {
+				.done(function () {
 					done();
 				});
 		});
 
 		it("must throw if its first argument is not a string", function (done) {
-			var message = "";
 			Q()
 				.then(function () {
-					return db.get({});
+					return db.deleteObject({});
 				})
 				.catch(function (e) {
-					message = e.message;
-					message.must.equal("First argument must be a string.");
-					done();
+					e.message.must.equal("First argument must be a string.");
 				})
-				.done();
-		});
-
-		it("must return an object when in the db there is a stringified object", function (done) {
-			Q()
-				.then(function () {
-					return db.get(JSONStringKey);
-				})
-				.then(function (obj) {
-					_.isEqual(obj, object).must.be.true();
-					done();
-				})
-				.done();
-		});
-
-		it("must return undefined when in the db there is something other than a stringified object", function (done) {
-			Q()
-				.then(function () {
-					return db.get(nonJSONStringKey);
-				})
-				.then(function (obj) {
-					(_.isUndefined(obj)).must.be.true();
-					done();
-				})
-				.done();
-		});
-
-		it("must return undefined when in the db there is nothing", function (done) {
-			Q()
-				.then(function () {
-					return db.get(nonExistingKey);
-				})
-				.then(function (obj) {
-					(_.isUndefined(obj)).must.be.true();
-					done();
-				})
-				.done();
-		});
-
-		after(function (done) {
-			Q()
-				.then(function () {
-					return rdb.del(JSONStringKey);
-				})
-				.then(function () {
-					return rdb.del(nonJSONStringKey);
-				})
-				.then(function () {
-					var deferred = Q.defer();
-					rdb.client.quit();
-					rdb.client.on("end", deferred.resolve);
-					return deferred.promise;
-				})
-				.then(function () {
-					return db.disconnect();
-				})
-				.then(function () {
+				.done(function () {
 					done();
 				});
 		});
 
-	});
-
-// }}}
-// {{{ Upon connection, the set method
-
-	describe("Upon connection, the set method", function (done) {
-
-		var rdb = {};
-		var key = "setTestKey";
-		var object = {
-			"testProperty": "testValue"
-		};
-
-		before(function (done) {
+		it("must throw if in the db there is not a stringified object", function (done) {
 			Q()
 				.then(function () {
-					var deferred = Q.defer();
-					rdb.client	= redis.createClient();
-					rdb.get	= Q.nbind(rdb.client.get, rdb.client);
-					rdb.del	= Q.nbind(rdb.client.del, rdb.client);
-					rdb.client.on("ready", deferred.resolve);
-					return deferred.promise;
-				})
-				.then(function () {
-					return rdb.del(key);
-				})
-				.then(function () {
-					return db.connect();
-				})
-				.then(function () {
-					done();
-				});
-		});
-
-		it("must throw if its first argument is not a string", function (done) {
-			var message;
-			Q()
-				.then(function () {
-					return db.set({});
+					return kodb.deleteObject(nonJSONStringKey);
 				})
 				.catch(function (e) {
-					message = e.message;
-					message.must.equal("First argument must be a string.");
-					done();
+					e.message.must.equal("Not an object.");
 				})
-				.done();
-		});
-
-		it("must throw if its second argument is not a plain object", function (done) {
-			var message;
-			Q()
-				.then(function () {
-					return db.set("", "");
-				})
-				.catch(function (e) {
-					message = e.message;
-					message.must.equal("Second argument must be a plain object.");
-					done();
-				})
-				.done();
-		});
-
-		it("must set key/value to first argument/JSON-encoded second argument", function (done) {
-			Q()
-				.then(function () {
-					return db.set(key, object);
-				})
-				.then(function () {
-					return rdb.get(key);
-				})
-				.then(function (value) {
-					value.must.equal(JSON.stringify(object));
-					done();
-				})
-				.done();
-		});
-
-		after(function (done) {
-			Q()
-				.then(function () {
-					return rdb.del(key);
-				})
-				.then(function () {
-					var deferred = Q.defer();
-					rdb.client.quit();
-					rdb.client.on("end", deferred.resolve);
-					return deferred.promise;
-				})
-				.then(function () {
-					return db.disconnect();
-				})
-				.then(function () {
+				.done(function () {
 					done();
 				});
-		});
-
-	});
-
-// }}}
-// {{{ Upon connection, the del method
-
-	describe("Upon connection, the del method", function (done) {
-
-		var rdb = {};
-		var key = "delTestKey";
-		var object = {
-			"testProperty": "testValue"
-		};
-
-		before(function (done) {
-			Q()
-				.then(function () {
-					var deferred = Q.defer();
-					rdb.client	= redis.createClient();
-					rdb.exists	= Q.nbind(rdb.client.exists, rdb.client);
-					rdb.client.on("ready", deferred.resolve);
-					return deferred.promise;
-				})
-				.then(function () {
-					return db.connect();
-				})
-				.then(function () {
-					return db.set(key, object);
-				})
-				.then(function () {
-					done();
-				});
-		});
-
-		it("must throw if its first argument is not a string", function (done) {
-			var message;
-			Q()
-				.then(function () {
-					return db.del({});
-				})
-				.catch(function (e) {
-					message = e.message;
-					message.must.equal("First argument must be a string.");
-					done();
-				})
-				.done();
 		});
 
 		it("must delete the key from the database", function (done) {
 			Q()
 				.then(function () {
-					return rdb.exists(key);
+					return rdb.exists(JSONStringKey);
 				})
 				.then(function (exists) {
 					exists.must.equal(1);
-					return db.del(key);
+					return kodb.deleteObject(JSONStringKey);
 				})
 				.then(function () {
-					return rdb.exists(key);
+					return rdb.exists(JSONStringKey);
 				})
 				.then(function (exists) {
 					exists.must.equal(0);
-					done();
 				})
-				.done();
+				.done(function () {
+					done();
+				});
 		});
 
 		after(function (done) {
@@ -532,7 +418,7 @@
 					return deferred.promise;
 				})
 				.then(function () {
-					return db.disconnect();
+					return kodb.disconnect();
 				})
 				.then(function () {
 					done();
@@ -685,3 +571,17 @@
 	});
 
 // }}}
+*/
+
+// Tear down
+
+	after(function (done) {
+		Q()
+			.then(function () {
+				var deferred = Q.defer();
+				REDIS.client.quit();
+				REDIS.client.on("end", deferred.resolve);
+				return deferred.promise;
+			})
+			.done(done);
+	});
